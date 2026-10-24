@@ -2,7 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
+  computeGentleBlackHoleRotation,
+  stepCursorTrailParticle,
   stepParticleKinematics,
+  type CursorTrailParticle,
   type ParticleState,
   type SimulationConfig,
 } from '../utils/blackholePhysics';
@@ -30,24 +33,27 @@ const GARGANTUA_VERTEX_SHADER = `
   varying vec2 vUv;
   void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    // Render directly as a full-viewport NDC quad (-1..+1) so vUv maps 1:1 to screen pixels
+    // without PerspectiveCamera frustum distortion at any aspect ratio (fullscreen or half-screen)
+    gl_Position = vec4(position.xy, 0.999, 1.0);
   }
 `;
 
 /**
- * Calibrated Relativistic Gargantua Fragment Shader matching the Mertana reference:
- * - Deep pitch-black cosmic background (#050508) around top-left, top-right, and bottom-left text
- * - Central Black Hole Shadow at uv ~(0.495, 0.46) with radius R_shadow = 0.34 in aspect-corrected space
- * - Dual razor-thin inner Photon Rings inside the shadow edge
- * - Concentric striated Gravitational Lensing arches (top arch rises into 'r t a' of Mertana; bottom arch has dark asteroid dust)
- * - Focused, fibrous diagonal Accretion Disk (-21.5 deg) slicing across the lower-center of the shadow with bright limb flares
- * - Lower-right tidal ember & dust spray + bottom-right curved molten exoplanet limb
+ * Calibrated Relativistic Gargantua Fragment Shader with Gentle Rotating Motion
+ * & Interactive Cursor Vortex Lensing:
+ * - Smooth, unhurried azimuthal rotation of the gravitational lensing rings (uLensingAngle)
+ * - Gentle, majestic drift of the diagonal accretion plasma filaments (uAccretionPhase)
+ * - Interactive cursor swirl eddy & gravitational micro-lensing around uPointer
+ * - Unobstructed bottom-right molten exoplanet limb with glowing volcanic fissures
  */
 const GARGANTUA_FRAGMENT_SHADER = `
   precision highp float;
 
   varying vec2 vUv;
   uniform float uTime;
+  uniform float uLensingAngle;
+  uniform float uAccretionPhase;
   uniform vec2 uResolution;
   uniform vec2 uPointer;
   uniform float uPointerActive;
@@ -89,63 +95,68 @@ const GARGANTUA_FRAGMENT_SHADER = `
 
   void main() {
     float aspect = uResolution.x / max(uResolution.y, 1.0);
-    // p.y spans [-1.0, +1.0], centered slightly below vertical midpoint (0.465)
     vec2 centerUv = vec2(0.495, 0.465);
+    // Because vUv spans the exact viewport [0..1], multiplying x by aspect makes 1 unit in p.x
+    // equal the exact same number of pixels as 1 unit in p.y on any screen or fullscreen monitor.
     vec2 p = (vUv - centerUv) * vec2(aspect, 1.0) * 2.0;
 
-    // Subtle pointer gravitational lensing warp
+    // Interactive cursor gravitational swirl & micro-lensing distortion
     vec2 ptr = (uPointer - centerUv) * vec2(aspect, 1.0) * 2.0;
     vec2 toPtr = p - ptr;
     float ptrDist = length(toPtr);
     if (uPointerActive > 0.01) {
-      float pull = exp(-ptrDist * 3.2) * 0.038 * uPointerActive * uLensingIntensity;
-      p -= normalize(toPtr + vec2(0.0001)) * pull;
+      float pull = exp(-ptrDist * 3.0) * 0.042 * uPointerActive * uLensingIntensity;
+      vec2 radialDir = normalize(toPtr + vec2(0.0001));
+      vec2 tangentDir = vec2(-radialDir.y, radialDir.x);
+      p -= (radialDir * 0.65 - tangentDir * 0.75) * pull;
     }
 
-    // Rotate into black hole accretion frame (+21.5 deg: bottom-left to top-right)
+    // Rotate into black hole accretion frame (with gentle precession tilt)
     float c = cos(uTiltRad);
     float s = sin(uTiltRad);
     vec2 q = vec2(p.x * c + p.y * s, -p.x * s + p.y * c);
 
     float r = length(q);
     float angle = atan(q.y, q.x);
-    float t = uTime * uSpinSpeed;
 
     // 0. Deep pitch-black cosmic background with fine pinpoint stars
     vec3 col = vec3(0.020, 0.022, 0.028);
 
-    // Subtle pinpoint starfield outside the shadow
     vec2 starCell = floor(p * 115.0);
     vec2 starFract = fract(p * 115.0) - 0.5;
     float starSeed = hash21(starCell);
     if (starSeed > 0.986 && r > 0.36) {
       float dStar = length(starFract);
       float starDot = exp(-dStar * dStar * 95.0);
-      float twinkle = 0.6 + 0.4 * sin(uTime * 2.5 + starSeed * 120.0);
+      float twinkle = 0.65 + 0.35 * sin(uTime * 1.4 + starSeed * 120.0);
       col += vec3(0.96, 0.91, 0.82) * starDot * twinkle * 0.75;
     }
 
     // =========================================================================
-    // 1. GRAVITATIONAL LENSING HALO (Upper & Lower Concentric Warped Rings)
+    // 1. GRAVITATIONAL LENSING HALO (1:1 Circular Concentric Rotating Rings)
     // =========================================================================
-    // Shadow radius R_s = 0.355. The lensed halo wraps tightly from r = 0.355 to r = 0.62
-    vec2 haloQ = vec2(q.x * 0.97, q.y * 1.0);
+    vec2 haloQ = q;
     float rHalo = length(haloQ);
-    float haloTheta = atan(haloQ.y, haloQ.x);
+    // Rotate polar coordinates smoothly around the black hole axis
+    float rotatedTheta = atan(haloQ.y, haloQ.x) - uLensingAngle;
 
-    // Concentric multi-ring striations matching the reference image's fine golden grooves
-    float azimFlow = fbm(vec2(rHalo * 22.0, haloTheta * 3.0 - t * 1.2));
-    float fineGrooves = 0.52 + 0.48 * sin(rHalo * 240.0 + azimFlow * 5.0 - t * 1.6);
-    float medGrooves = 0.55 + 0.45 * cos(rHalo * 88.0 - azimFlow * 3.5);
-    float ringPattern = mix(0.35, 1.35, fineGrooves * medGrooves);
+    // Periodic azimuthal coordinates so the rotating ring has zero seam
+    vec2 polarUv = vec2(
+      cos(rotatedTheta) * 2.2 + rHalo * 12.0,
+      sin(rotatedTheta) * 2.2 - rHalo * 12.0
+    );
+    float azimFlow = fbm(polarUv + vec2(uAccretionPhase * 0.35, -uAccretionPhase * 0.25));
+    float fineGrooves = 0.52 + 0.48 * sin(rHalo * 210.0 + azimFlow * 5.2 - uLensingAngle * 2.0);
+    float medGrooves = 0.55 + 0.45 * cos(rHalo * 78.0 - azimFlow * 3.6 + uLensingAngle);
+    // Subtle rotating luminous plasma wave around the ring circumference
+    float orbitalWave = 0.84 + 0.16 * sin(rotatedTheta * 2.0 + rHalo * 14.0);
+    float ringPattern = mix(0.35, 1.35, fineGrooves * medGrooves) * orbitalWave;
 
-    // Tight radial envelope: peaks between r = 0.37 and r = 0.53, fades cleanly to black by r = 0.64
-    float innerRise = smoothstep(0.350, 0.382, rHalo);
-    float outerDecay = smoothstep(0.66, 0.40, rHalo) * exp(-max(0.0, rHalo - 0.39) * 8.5);
+    float innerRise = smoothstep(0.415, 0.452, rHalo);
+    float outerDecay = smoothstep(0.78, 0.47, rHalo) * exp(-max(0.0, rHalo - 0.46) * 7.2);
     float haloRadial = innerRise * outerDecay * uLensingIntensity;
 
-    // Brightest near the inner rim and upper-left / right shoulders
-    float innerRimBoost = exp(-pow((rHalo - 0.385) / 0.032, 2.0)) * 0.55;
+    float innerRimBoost = exp(-pow((rHalo - 0.455) / 0.036, 2.0)) * 0.55;
     float haloEnergy = (haloRadial * ringPattern + innerRimBoost * innerRise) * uResonance;
 
     vec3 darkAmber = vec3(0.62, 0.24, 0.06);
@@ -158,53 +169,45 @@ const GARGANTUA_FRAGMENT_SHADER = `
     col += haloCol * haloEnergy * 1.25;
 
     // =========================================================================
-    // 2. EVENT HORIZON SHADOW (Pure Pitch-Black Void) & INNER PHOTON RINGS
+    // 2. EVENT HORIZON SHADOW & GENTLY ROTATING INNER PHOTON RINGS
     // =========================================================================
-    float shadowMask = smoothstep(0.348, 0.362, r);
+    float shadowMask = smoothstep(0.412, 0.428, r);
     col *= shadowMask;
-    // Deep pure black interior inside r < 0.348
     col = mix(vec3(0.012, 0.012, 0.015), col, shadowMask);
 
-    // Outer razor-thin photon ring right at the shadow rim (r = 0.354)
-    float photonRingOuter = exp(-pow((r - 0.354) / 0.0042, 2.0)) * 1.35;
-    // Secondary ultra-thin inner photon ring inside the shadow (r = 0.312) matching reference image!
-    float photonRingInner = exp(-pow((r - 0.312) / 0.0032, 2.0)) * 0.78;
+    float photonShimmer = 0.85 + 0.15 * sin(angle * 3.0 - uLensingAngle * 2.5);
+    float photonRingOuter = exp(-pow((r - 0.420) / 0.0046, 2.0)) * 1.35 * photonShimmer;
+    float photonRingInner = exp(-pow((r - 0.372) / 0.0035, 2.0)) * 0.78 * (0.8 + 0.2 * cos(angle * 2.0 - uLensingAngle * 1.8));
     col += vec3(1.0, 0.94, 0.82) * (photonRingOuter + photonRingInner) * uLensingIntensity;
 
     // =========================================================================
-    // 3. DIAGONAL EQUATORIAL ACCRETION DISK (Bottom-Left to Top-Right)
+    // 3. DIAGONAL EQUATORIAL ACCRETION DISK (Smooth, Unhurried Plasma Flow)
     // =========================================================================
-    // Passes slightly below center (q.y ~ -0.048) so both upper and lower black semicircles are distinct
-    float diskY = q.y + 0.048 - 0.010 * q.x * q.x;
+    float diskY = q.y + 0.052 - 0.010 * q.x * q.x;
 
-    // Tight blade across the black shadow (0.018), widening into fibrous wings outside |q.x| > 0.38
-    float wingSpread = smoothstep(0.28, 1.15, abs(q.x));
-    float shoulderFlare = exp(-pow((abs(q.x) - 0.42) / 0.14, 2.0));
-    float halfThick = 0.019 + 0.072 * wingSpread + 0.022 * shoulderFlare;
+    float wingSpread = smoothstep(0.32, 1.35, abs(q.x));
+    float shoulderFlare = exp(-pow((abs(q.x) - 0.49) / 0.16, 2.0));
+    float halfThick = 0.021 + 0.078 * wingSpread + 0.025 * shoulderFlare;
 
-    // Core beam + fibrous outer plasma sheet
     float coreBeam = exp(-pow(diskY / (halfThick * 0.52), 2.0));
     float wingSheet = exp(-pow(diskY / (halfThick * 1.65), 2.0)) * (0.32 + 0.55 * wingSpread);
 
-    // Fibrous turbulent streaks streaming along the disk
+    // Gentle, hypnotic orbital drift along the accretion plane
     vec2 flowCoord = vec2(
-      q.x * 3.6 - t * 1.5,
-      diskY / max(halfThick, 0.015) * 2.2 + fbm(vec2(q.x * 5.0 - t * 0.8, diskY * 12.0)) * 1.2
+      q.x * 3.2 - uAccretionPhase * 1.15,
+      diskY / max(halfThick, 0.015) * 2.2 + fbm(vec2(q.x * 4.2 - uAccretionPhase * 0.65, diskY * 12.0)) * 1.15
     );
-    float filaments = fbm(flowCoord * vec2(2.4, 5.2));
-    float fineFibers = noise2D(flowCoord * vec2(8.0, 20.0) - vec2(t * 2.2, 0.0));
-    float fiberMod = mix(0.38, 1.42, filaments * 0.65 + fineFibers * 0.35);
+    float filaments = fbm(flowCoord * vec2(2.4, 5.0));
+    float fineFibers = noise2D(flowCoord * vec2(7.5, 18.0) - vec2(uAccretionPhase * 1.5, 0.0));
+    float fiberMod = mix(0.40, 1.40, filaments * 0.65 + fineFibers * 0.35);
 
-    // Taper smoothly toward the screen edges so bottom-left text has high contrast
-    float reachMask = exp(-pow(abs(q.x) / 1.48, 2.4));
+    float reachMask = exp(-pow(abs(q.x) / (max(1.35, aspect * 0.98)), 2.4));
 
-    // White-hot Doppler knots where the disk intersects the left and right photon ring shoulders (|q.x| ~ 0.39)
-    float knotLeft = exp(-pow((q.x + 0.385) / 0.105, 2.0) - pow((diskY + 0.008) / 0.042, 2.0));
-    float knotRight = exp(-pow((q.x - 0.395) / 0.115, 2.0) - pow((diskY - 0.008) / 0.046, 2.0));
+    float knotLeft = exp(-pow((q.x + 0.455) / 0.115, 2.0) - pow((diskY + 0.008) / 0.046, 2.0));
+    float knotRight = exp(-pow((q.x - 0.465) / 0.125, 2.0) - pow((diskY - 0.008) / 0.050, 2.0));
     float shoulderFlares = (knotLeft * 1.45 + knotRight * 1.65) * uLensingIntensity;
 
-    // Cusp curves bending from the shoulders into the upper/lower lensing arches
-    float cuspBend = exp(-pow((abs(q.x) - 0.43) / 0.12, 2.0)) * exp(-pow(abs(q.y) / 0.18, 2.0)) * 0.48;
+    float cuspBend = exp(-pow((abs(q.x) - 0.50) / 0.14, 2.0)) * exp(-pow(abs(q.y) / 0.21, 2.0)) * 0.48;
 
     float diskIntensity =
       ((coreBeam * 1.15 + wingSheet * fiberMod) * reachMask + shoulderFlares + cuspBend) *
@@ -222,15 +225,14 @@ const GARGANTUA_FRAGMENT_SHADER = `
     // =========================================================================
     // 4. LOWER-RIGHT TIDAL DUST NEBULA, EMBER SPARKS & ORGANIC DEBRIS SILHOUETTES
     // =========================================================================
-    vec2 sprayVec = p - vec2(0.36, -0.44);
-    float sprayEnv = exp(-dot(sprayVec * vec2(0.85, 1.15), sprayVec * vec2(0.85, 1.15)) * 2.4);
-    float smokyDust = fbm(p * 6.5 + vec2(-t * 0.2, t * 0.15));
+    vec2 sprayVec = p - vec2(0.44, -0.48);
+    float sprayEnv = exp(-dot(sprayVec * vec2(0.80, 1.10), sprayVec * vec2(0.80, 1.10)) * 2.1);
+    float smokyDust = fbm(p * 6.5 + vec2(-uAccretionPhase * 0.25, uAccretionPhase * 0.18));
     col += vec3(0.88, 0.56, 0.28) * sprayEnv * smokyDust * 0.45;
 
-    // Multi-scale glowing golden/white cosmic sparks in the lower-right spray
     for (int layer = 0; layer < 2; layer++) {
       float scale = layer == 0 ? 72.0 : 128.0;
-      vec2 drift = vec2(-t * (0.35 + float(layer) * 0.2), t * 0.22);
+      vec2 drift = vec2(-uAccretionPhase * (0.35 + float(layer) * 0.2), uAccretionPhase * 0.22);
       vec2 gridP = p * scale + drift;
       vec2 cell = floor(gridP);
       vec2 local = fract(gridP) - 0.5;
@@ -244,9 +246,8 @@ const GARGANTUA_FRAGMENT_SHADER = `
       }
     }
 
-    // Organic rounded dark dust silhouettes across the lower-right gravitational lensing arch
-    if (q.y < -0.05 && rHalo > 0.36 && rHalo < 0.62 && q.x > -0.15) {
-      vec2 dustGrid = q * 95.0 + vec2(t * 1.4, -t * 0.8);
+    if (q.y < -0.05 && rHalo > 0.42 && rHalo < 0.72 && q.x > -0.15) {
+      vec2 dustGrid = q * 95.0 + vec2(uAccretionPhase * 1.1, -uAccretionPhase * 0.65);
       vec2 dCell = floor(dustGrid);
       vec2 dLocal = fract(dustGrid) - 0.5;
       float dh = hash21(dCell);
@@ -259,9 +260,9 @@ const GARGANTUA_FRAGMENT_SHADER = `
     }
 
     // =========================================================================
-    // 5. FOREGROUND MOLTEN EXOPLANET LIMB (Bottom-Right Corner matching Reference)
+    // 5. FOREGROUND MOLTEN EXOPLANET LIMB (Anchored to Bottom-Right Corner)
     // =========================================================================
-    vec2 planetCenter = vec2(1.42, -1.18);
+    vec2 planetCenter = vec2(aspect * 0.90 + 0.36, -1.34);
     float planetRadius = 1.12;
     vec2 toPlanet = p - planetCenter;
     float distPlanet = length(toPlanet);
@@ -275,10 +276,9 @@ const GARGANTUA_FRAGMENT_SHADER = `
         float pz = sqrt(max(0.0, 1.0 - dot(lp, lp)));
         vec3 n = normalize(vec3(lp.x, lp.y, pz));
 
-        // Sweeping diagonal volcanic ridges parallel to the limb curvature
         vec2 bandUv = vec2(lp.x * 0.74 + lp.y * 0.67, -lp.x * 0.67 + lp.y * 0.74);
-        float bands = fbm(bandUv * vec2(4.2, 18.0) + vec2(-t * 0.08, 0.0));
-        float cracks = fbm(bandUv * vec2(14.0, 38.0) - vec2(t * 0.14, 0.0));
+        float bands = fbm(bandUv * vec2(4.2, 18.0) + vec2(-uAccretionPhase * 0.09, 0.0));
+        float cracks = fbm(bandUv * vec2(14.0, 38.0) - vec2(uAccretionPhase * 0.15, 0.0));
 
         vec3 lightDir = normalize(vec3(-0.78, 0.58, 0.24));
         float ndotl = max(0.0, dot(n, lightDir));
@@ -291,7 +291,6 @@ const GARGANTUA_FRAGMENT_SHADER = `
         vec3 surf = mix(obsidianCrust, burntSienna, ndotl * 0.9 + bands * 0.38);
         surf = mix(surf, brightMagma, magmaStreak * (0.42 + 0.65 * ndotl));
 
-        // Glowing volcanic hotspots near the bottom edge of the planet limb
         float hotspot = smoothstep(0.68, 0.90, cracks) * smoothstep(-0.55, -0.98, p.y);
         surf += vec3(1.0, 0.62, 0.18) * hotspot * 1.15;
 
@@ -301,7 +300,7 @@ const GARGANTUA_FRAGMENT_SHADER = `
     }
 
     // =========================================================================
-    // 6. SHOCKWAVE PULSE & CURSOR INTERACTION GLOW
+    // 6. SHOCKWAVE PULSE & INTERACTIVE CURSOR SWIRL VORTEX GLOW
     // =========================================================================
     if (uShockwave > 0.001 && uShockwave < 0.999) {
       float waveR = 0.35 + uShockwave * 1.25;
@@ -310,11 +309,14 @@ const GARGANTUA_FRAGMENT_SHADER = `
     }
 
     if (uPointerActive > 0.01) {
-      float cursorGlow = exp(-ptrDist * 11.0) * 0.38 * uPointerActive;
-      col += vec3(1.0, 0.76, 0.38) * cursorGlow;
+      float ptrAngle = atan(toPtr.y, toPtr.x);
+      float spiralArms = 0.6 + 0.4 * sin(ptrAngle * 3.0 - ptrDist * 18.0 + uTime * 4.5);
+      float vortexRing = exp(-pow((ptrDist - 0.08) / 0.055, 2.0)) * spiralArms;
+      float cursorCore = exp(-ptrDist * 14.0);
+      col += mix(vec3(1.0, 0.68, 0.25), vec3(1.0, 0.96, 0.88), cursorCore) *
+             (cursorCore * 0.35 + vortexRing * 0.28) * uPointerActive;
     }
 
-    // Gentle tone compression so highlights stay creamy ivory rather than harsh clipping
     col = col / (1.0 + col * 0.22);
 
     gl_FragColor = vec4(col, 1.0);
@@ -337,7 +339,7 @@ const PARTICLE_VERTEX_SHADER = `
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     float dist = max(1.0, -mvPosition.z);
 
-    float twinkle = 0.75 + 0.25 * sin(uTime * 4.5 + aPhase * 6.2831);
+    float twinkle = 0.78 + 0.22 * sin(uTime * 3.2 + aPhase * 6.2831);
     vAlpha = twinkle * smoothstep(22.0, 3.0, dist);
 
     gl_PointSize = clamp((aSize * uPixelRatio * 22.0) / dist, 1.2, 18.0);
@@ -368,6 +370,56 @@ const PARTICLE_FRAGMENT_SHADER = `
     color = mix(color, whiteHot, smoothstep(0.65, 1.0, vHeat));
 
     gl_FragColor = vec4(color * intensity * 1.25, intensity * vAlpha);
+  }
+`;
+
+/**
+ * Shaders for the Interactive Cursor Swirl & Trail Particle Ribbon
+ */
+const TRAIL_VERTEX_SHADER = `
+  attribute float aLife;
+  attribute float aSize;
+
+  varying float vLife;
+
+  uniform float uPixelRatio;
+
+  void main() {
+    vLife = aLife;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    float dist = max(1.0, -mvPosition.z);
+
+    // Trail particles bloom when freshly spawned and taper smoothly as they swirl
+    float lifeScale = sin(clamp(aLife, 0.0, 1.0) * 3.14159);
+    gl_PointSize = clamp((aSize * (0.4 + 0.9 * lifeScale) * uPixelRatio * 26.0) / dist, 0.0, 24.0);
+    gl_Position = projectionMatrix * mvPosition;
+  }
+`;
+
+const TRAIL_FRAGMENT_SHADER = `
+  precision mediump float;
+
+  varying float vLife;
+
+  void main() {
+    if (vLife <= 0.01) discard;
+    vec2 uv = gl_PointCoord - vec2(0.5);
+    float d = length(uv);
+    if (d > 0.5) discard;
+
+    float core = exp(-d * d * 26.0);
+    float glow = smoothstep(0.5, 0.0, d) * 0.6;
+    float intensity = (core + glow) * smoothstep(0.0, 0.2, vLife);
+
+    // Color transitions from incandescent diamond-ivory at cursor to golden-amber to warm crimson ember
+    vec3 tailEmber = vec3(0.92, 0.32, 0.08);
+    vec3 midGold = vec3(1.0, 0.78, 0.32);
+    vec3 headIvory = vec3(1.0, 0.98, 0.92);
+
+    vec3 col = mix(tailEmber, midGold, smoothstep(0.0, 0.55, vLife));
+    col = mix(col, headIvory, smoothstep(0.55, 1.0, vLife));
+
+    gl_FragColor = vec4(col * intensity * 1.45, intensity * 0.92);
   }
 `;
 
@@ -468,15 +520,23 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
     // =========================================================================
     // A. RELATIVISTIC GARGANTUA SHADER BACKDROP
     // =========================================================================
+    const initialRot = computeGentleBlackHoleRotation(
+      1.4,
+      configRef.current.spinSpeed,
+      configRef.current.diskTiltDeg
+    );
+
     const gargantuaUniforms = {
       uTime: { value: 1.4 },
+      uLensingAngle: { value: initialRot.lensingAngle },
+      uAccretionPhase: { value: initialRot.accretionPhase },
       uResolution: { value: new THREE.Vector2(width, height) },
       uPointer: { value: new THREE.Vector2(0.5, 0.5) },
       uPointerActive: { value: 0.0 },
       uSpinSpeed: { value: configRef.current.spinSpeed },
       uLensingIntensity: { value: configRef.current.lensingIntensity },
       uTurbulence: { value: configRef.current.particleTurbulence },
-      uTiltRad: { value: (21.5 * Math.PI) / 180 },
+      uTiltRad: { value: initialRot.precessionTiltRad },
       uShockwave: { value: 0.0 },
       uResonance: { value: pillarMultRef.current },
     };
@@ -489,61 +549,58 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       depthTest: false,
     });
 
-    const backdropGeo = new THREE.PlaneGeometry(32, 18);
+    const backdropGeo = new THREE.PlaneGeometry(2, 2);
     const backdropMesh = new THREE.Mesh(backdropGeo, backdropMat);
-    backdropMesh.position.set(0, 0, -2.0);
+    backdropMesh.frustumCulled = false;
     backdropMesh.renderOrder = 0;
     scene.add(backdropMesh);
 
     // =========================================================================
-    // B. COMPOSITE 3D FOREGROUND MOLTEN EXOPLANET & DEBRIS CLUSTER (THREE.Group)
+    // B. COMPOSITE 3D TIDAL METEOROID CLUSTER (THREE.Group, 4 distinct parts)
+    // Positioned in the lower-right tidal stream without occluding the planet limb
     // =========================================================================
-    const exoplanetGroup = new THREE.Group();
-    exoplanetGroup.position.set(5.4, -4.1, -0.6);
-    scene.add(exoplanetGroup);
+    const meteoroidGroup = new THREE.Group();
+    meteoroidGroup.position.set(1.65, -1.45, 0.35);
+    scene.add(meteoroidGroup);
 
-    const crustGeo = new THREE.SphereGeometry(2.4, 32, 32);
-    const crustMat = new THREE.MeshStandardMaterial({
+    const primaryRockGeo = new THREE.DodecahedronGeometry(0.065, 1);
+    const primaryRockMat = new THREE.MeshStandardMaterial({
       color: 0x1c0a05,
       emissive: 0x4a1606,
-      emissiveIntensity: 0.45,
-      roughness: 0.85,
-      metalness: 0.15,
+      emissiveIntensity: 0.35,
+      roughness: 0.82,
+      metalness: 0.18,
     });
-    const crustMesh = new THREE.Mesh(crustGeo, crustMat);
-    exoplanetGroup.add(crustMesh);
+    const primaryRockMesh = new THREE.Mesh(primaryRockGeo, primaryRockMat);
+    meteoroidGroup.add(primaryRockMesh);
 
-    const magmaRimGeo = new THREE.TorusGeometry(2.42, 0.03, 16, 64);
-    const magmaRimMat = new THREE.MeshStandardMaterial({
+    const emberVeinGeo = new THREE.DodecahedronGeometry(0.042, 0);
+    const emberVeinMat = new THREE.MeshStandardMaterial({
       color: 0xff5a1f,
       emissive: 0xff4500,
-      emissiveIntensity: 1.2,
-      roughness: 0.4,
+      emissiveIntensity: 0.95,
+      roughness: 0.45,
       metalness: 0.5,
-      transparent: true,
-      opacity: 0.35,
     });
-    const magmaRimMesh = new THREE.Mesh(magmaRimGeo, magmaRimMat);
-    magmaRimMesh.rotation.x = 0.6;
-    magmaRimMesh.rotation.y = -0.5;
-    exoplanetGroup.add(magmaRimMesh);
+    const emberVeinMesh = new THREE.Mesh(emberVeinGeo, emberVeinMat);
+    emberVeinMesh.position.set(0.28, -0.18, 0.12);
+    meteoroidGroup.add(emberVeinMesh);
 
-    const satelliteShardGeo = new THREE.DodecahedronGeometry(0.12, 1);
+    const satelliteShardGeo = new THREE.DodecahedronGeometry(0.032, 0);
     const satelliteShardMat = new THREE.MeshStandardMaterial({
       color: 0x261109,
-      roughness: 0.6,
+      roughness: 0.55,
       metalness: 0.45,
     });
     const satelliteShard = new THREE.Mesh(satelliteShardGeo, satelliteShardMat);
-    satelliteShard.position.set(-2.6, 1.5, 0.4);
-    exoplanetGroup.add(satelliteShard);
+    satelliteShard.position.set(-0.24, 0.15, 0.08);
+    meteoroidGroup.add(satelliteShard);
 
     // =========================================================================
     // C. 3D ROCKY ASTEROID & TIDAL DEBRIS SHARDS (THREE.InstancedMesh, 85 instances)
-    // Fine meteoroid fragments silhouetted against the lower-right lensing arch
     // =========================================================================
     const shardCount = 85;
-    const shardGeo = new THREE.DodecahedronGeometry(0.026, 0);
+    const shardGeo = new THREE.DodecahedronGeometry(0.025, 0);
     const shardMat = new THREE.MeshStandardMaterial({
       color: 0x160b06,
       emissive: 0x381205,
@@ -583,7 +640,7 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       const orbitRadius = isTidalSpray ? 1.8 + r1 * 2.8 : 2.2 + r1 * 4.2;
       const orbitAngle = isTidalSpray ? -1.25 + r2 * 1.25 : r2 * Math.PI * 2;
 
-      const s = 0.35 + Math.pow(r3, 1.6) * 1.15;
+      const s = 0.35 + Math.pow(r3, 1.6) * 1.1;
       const scaleVec = new THREE.Vector3(s * (0.7 + r1 * 0.6), s * (0.5 + r2 * 0.5), s);
 
       shards.push({
@@ -592,9 +649,9 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         baseZ: 0.4 + r3 * 1.2,
         orbitAngle,
         orbitRadius,
-        orbitSpeed: (0.16 + r1 * 0.32) * (isTidalSpray ? 0.7 : 1.0),
-        rotSpeedX: (r2 - 0.5) * 2.5,
-        rotSpeedY: (r3 - 0.5) * 2.5,
+        orbitSpeed: (0.09 + r1 * 0.18) * (isTidalSpray ? 0.7 : 1.0),
+        rotSpeedX: (r2 - 0.5) * 1.4,
+        rotSpeedY: (r3 - 0.5) * 1.4,
         scale: scaleVec,
         isTidalSpray,
       });
@@ -630,7 +687,6 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       const s3 = Math.sin(i * 19.37 + 5.1) * 31942.881;
       const u3 = s3 - Math.floor(s3);
 
-      // 60% in the lower-right tidal ember spray, 40% in the diagonal accretion stream
       const isTidalCluster = i < particleCount * 0.6;
       const radius = isTidalCluster ? 1.7 + Math.pow(u1, 1.2) * 4.5 : 1.75 + Math.pow(u1, 1.5) * 7.2;
       const angle = isTidalCluster ? -1.35 + u2 * 1.35 : u2 * Math.PI * 2;
@@ -646,7 +702,7 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         vz: 0,
         radius,
         angle,
-        angularSpeed: 0.5,
+        angularSpeed: 0.35,
         size,
         heat,
       };
@@ -687,12 +743,65 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
     particlePoints.renderOrder = 3;
     scene.add(particlePoints);
 
+    // =========================================================================
+    // E. INTERACTIVE CURSOR SWIRL & COMET TRAIL SYSTEM (420 Particles)
+    // =========================================================================
+    const trailCount = 420;
+    const trailParticles: CursorTrailParticle[] = [];
+    const trailPositions = new Float32Array(trailCount * 3);
+    const trailLifes = new Float32Array(trailCount);
+    const trailSizes = new Float32Array(trailCount);
+
+    for (let i = 0; i < trailCount; i++) {
+      const maxLife = 0.55 + (i % 9) * 0.14;
+      const sz = 0.9 + (i % 7) * 0.32;
+      trailParticles.push({
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        life: 0, // Staggered activation when pointer moves
+        maxLife,
+        size: sz,
+        swirlPhase: i * 0.45,
+      });
+      trailSizes[i] = sz;
+      trailLifes[i] = 0;
+    }
+
+    const trailGeo = new THREE.BufferGeometry();
+    const trailPosAttr = new THREE.BufferAttribute(trailPositions, 3);
+    trailPosAttr.setUsage(THREE.DynamicDrawUsage);
+    const trailLifeAttr = new THREE.BufferAttribute(trailLifes, 1);
+    trailLifeAttr.setUsage(THREE.DynamicDrawUsage);
+
+    trailGeo.setAttribute('position', trailPosAttr);
+    trailGeo.setAttribute('aLife', trailLifeAttr);
+    trailGeo.setAttribute('aSize', new THREE.BufferAttribute(trailSizes, 1));
+
+    const trailMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uPixelRatio: { value: pixelRatio },
+      },
+      vertexShader: TRAIL_VERTEX_SHADER,
+      fragmentShader: TRAIL_FRAGMENT_SHADER,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    });
+
+    const trailPoints = new THREE.Points(trailGeo, trailMat);
+    trailPoints.renderOrder = 4;
+    scene.add(trailPoints);
+
     if (!isSoftwareGl) {
       renderer.compile(scene, camera);
     }
 
     // =========================================================================
-    // E. POINTER INTERACTION & SHOCKWAVE BURST HANDLERS
+    // F. POINTER INTERACTION, VELOCITY TRACKING & TRAIL SPAWNING
     // =========================================================================
     const pointerState = {
       normX: 0.5,
@@ -700,8 +809,29 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       worldX: 0,
       worldY: 0,
       worldZ: 0,
+      vx: 0,
+      vy: 0,
       active: false,
       targetActive: 0,
+      spawnCursor: 0,
+    };
+
+    const emitCursorTrailBurst = (count: number, boostSpeed: number) => {
+      for (let k = 0; k < count; k++) {
+        const idx = pointerState.spawnCursor % trailCount;
+        pointerState.spawnCursor++;
+        const tp = trailParticles[idx];
+        const angle = idx * 2.39996 + tp.swirlPhase;
+        const rad = 0.04 + (k % 6) * 0.05;
+        const speed = (1.35 + (k % 5) * 0.35) * boostSpeed;
+        tp.x = pointerState.worldX + Math.cos(angle) * rad;
+        tp.y = pointerState.worldY + Math.sin(angle) * rad;
+        tp.z = 0.65;
+        tp.vx = -Math.sin(angle) * speed + pointerState.vx * 0.28;
+        tp.vy = Math.cos(angle) * speed + pointerState.vy * 0.28;
+        tp.vz = ((k % 3) - 1) * 0.15;
+        tp.life = 1.0;
+      }
     };
 
     const updatePointerFromClient = (clientX: number, clientY: number) => {
@@ -718,9 +848,16 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       _ndcMouse.set(nx * 2 - 1, ny * 2 - 1);
       _raycaster.setFromCamera(_ndcMouse, camera);
       if (_raycaster.ray.intersectPlane(_planeZ0, _vec3A)) {
+        const dx = _vec3A.x - pointerState.worldX;
+        const dy = _vec3A.y - pointerState.worldY;
+        pointerState.vx = THREE.MathUtils.clamp(dx * 18.0, -14.0, 14.0);
+        pointerState.vy = THREE.MathUtils.clamp(dy * 18.0, -14.0, 14.0);
         pointerState.worldX = _vec3A.x;
         pointerState.worldY = _vec3A.y;
         pointerState.worldZ = _vec3A.z;
+
+        // Immediately spawn swirling trail particles along the cursor trajectory
+        emitCursorTrailBurst(14, 1.0);
       }
     };
 
@@ -731,21 +868,26 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
     const onPointerLeave = () => {
       pointerState.active = false;
       pointerState.targetActive = 0.0;
+      pointerState.vx = 0;
+      pointerState.vy = 0;
     };
 
     const onPointerDown = (e: PointerEvent) => {
       updatePointerFromClient(e.clientX, e.clientY);
       shockwaveRef.current = 0.005;
 
+      // Spawn a rich swirlingnova burst of trail particles on click
+      emitCursorTrailBurst(64, 2.1);
+
       for (let i = 0; i < particleCount; i++) {
         const p = particleStates[i];
         const dx = p.x - pointerState.worldX;
         const dy = p.y - pointerState.worldY;
         const dist = Math.sqrt(dx * dx + dy * dy + 0.25);
-        if (dist < 4.5) {
-          const strength = (1.0 - dist / 4.5) * 2.2;
-          p.vx += (dx / dist) * strength - (dy / dist) * strength * 0.6;
-          p.vy += (dy / dist) * strength + (dx / dist) * strength * 0.6;
+        if (dist < 4.8) {
+          const strength = (1.0 - dist / 4.8) * 2.4;
+          p.vx += (dx / dist) * strength - (dy / dist) * strength * 0.85;
+          p.vy += (dy / dist) * strength + (dx / dist) * strength * 0.85;
           p.heat = 1.0;
         }
       }
@@ -761,15 +903,18 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       if (!container) return;
       const w = container.clientWidth || window.innerWidth;
       const h = container.clientHeight || window.innerHeight;
+      if (w <= 0 || h <= 0) return;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
       gargantuaUniforms.uResolution.value.set(w, h);
     };
     window.addEventListener('resize', onResize);
+    const resizeObserver = new ResizeObserver(() => onResize());
+    resizeObserver.observe(container);
 
     // =========================================================================
-    // F. ANIMATION LOOP WITH SOFTWARE-WEBGL `afterDraw` PACING
+    // G. ANIMATION LOOP WITH GENTLE ROTATION & SOFTWARE-WEBGL `afterDraw` PACING
     // =========================================================================
     let frameId = 0;
     let isDisposed = false;
@@ -808,13 +953,22 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       const resMult = pillarMultRef.current;
 
       if (shockwaveRef.current > 0) {
-        shockwaveRef.current += dt * 0.85;
+        shockwaveRef.current += dt * 0.75;
         if (shockwaveRef.current >= 1.0) {
           shockwaveRef.current = 0;
         }
       }
 
+      // Compute smooth, gentle rotation & precession for the black hole
+      const rotState = computeGentleBlackHoleRotation(
+        elapsedTotal,
+        cfg.spinSpeed,
+        cfg.diskTiltDeg
+      );
+
       gargantuaUniforms.uTime.value = elapsedTotal;
+      gargantuaUniforms.uLensingAngle.value = rotState.lensingAngle;
+      gargantuaUniforms.uAccretionPhase.value = rotState.accretionPhase;
       gargantuaUniforms.uSpinSpeed.value = THREE.MathUtils.damp(
         gargantuaUniforms.uSpinSpeed.value,
         cfg.spinSpeed,
@@ -833,10 +987,9 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         6,
         dt
       );
-      const targetTiltRad = (-cfg.diskTiltDeg * Math.PI) / 180;
       gargantuaUniforms.uTiltRad.value = THREE.MathUtils.damp(
         gargantuaUniforms.uTiltRad.value,
-        targetTiltRad,
+        rotState.precessionTiltRad,
         6,
         dt
       );
@@ -866,17 +1019,21 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         dt
       );
 
+      // Decay pointer velocity smoothly when cursor is stationary
+      pointerState.vx *= 0.88;
+      pointerState.vy *= 0.88;
+
       // Subtle camera parallax
-      const targetCamX = pointerState.active ? (pointerState.normX - 0.5) * 0.35 : 0;
-      const targetCamY = pointerState.active ? (pointerState.normY - 0.5) * 0.24 : 0;
+      const targetCamX = pointerState.active ? (pointerState.normX - 0.5) * 0.32 : 0;
+      const targetCamY = pointerState.active ? (pointerState.normY - 0.5) * 0.22 : 0;
       camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCamX, 4, dt);
       camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCamY, 4, dt);
       camera.lookAt(0, 0, 0);
 
-      // Rotate composite foreground exoplanet group
-      exoplanetGroup.rotation.z = elapsedTotal * 0.04 * cfg.spinSpeed;
-      satelliteShard.rotation.x += dt * 0.8;
-      satelliteShard.rotation.y += dt * 0.6;
+      // Gentle rotation of composite 3D meteoroid cluster
+      meteoroidGroup.rotation.z = elapsedTotal * 0.12 * cfg.spinSpeed;
+      satelliteShard.rotation.x += dt * 0.45;
+      satelliteShard.rotation.y += dt * 0.35;
 
       // Update 3D Rocky Debris Shards (InstancedMesh)
       const tiltR = (cfg.diskTiltDeg * Math.PI) / 180;
@@ -888,7 +1045,6 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         s.orbitAngle += dt * s.orbitSpeed * cfg.spinSpeed;
 
         if (s.isTidalSpray) {
-          // Concentrated in the lower-right tidal disruption zone between the ring and planet
           const localProgress = (Math.sin(s.orbitAngle * 1.1 + i) + 1) * 0.5;
           const px = 0.45 + localProgress * 2.8 + s.baseX;
           const py = -0.85 - localProgress * 1.9 + s.baseY;
@@ -909,12 +1065,14 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       }
       shardInstanced.instanceMatrix.needsUpdate = true;
 
-      // Update Interactive 3D Particle System
+      // Update Interactive 3D Ambient Particle System
       particlesMat.uniforms.uTime.value = elapsedTotal;
       const ptrInfo = {
         x: pointerState.worldX,
         y: pointerState.worldY,
         z: pointerState.worldZ,
+        vx: pointerState.vx,
+        vy: pointerState.vy,
         active: pointerState.active,
       };
 
@@ -932,12 +1090,12 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         particleStates[i] = nextP;
 
         if (i < particleCount * 0.6) {
-          // Lower-right tidal ember spray between lensing arch and bottom-right molten planet
+          // Lower-right tidal ember spray + interactive cursor swirl offset
           const sprayBias = i / (particleCount * 0.6);
           const spreadX = Math.sin(i * 17.3) * (0.35 + sprayBias * 0.95);
           const spreadY = Math.cos(i * 23.1) * (0.35 + sprayBias * 0.75);
-          const sx = nextP.x * 0.25 + 0.55 + sprayBias * 2.85 + spreadX;
-          const sy = nextP.y * 0.25 - 0.85 - sprayBias * 1.75 + spreadY;
+          const sx = nextP.x * 0.28 + 0.55 + sprayBias * 2.85 + spreadX + nextP.vx * 0.75;
+          const sy = nextP.y * 0.28 - 0.85 - sprayBias * 1.75 + spreadY + nextP.vy * 0.75;
           posArr[i * 3] = sx;
           posArr[i * 3 + 1] = sy;
           posArr[i * 3 + 2] = nextP.z * 0.25 + 0.5;
@@ -951,13 +1109,33 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       posAttr.needsUpdate = true;
       heatAttr.needsUpdate = true;
 
+      // Update Interactive Cursor Swirl & Trail Particle System
+      const tPosArr = trailPosAttr.array as Float32Array;
+      const tLifeArr = trailLifeAttr.array as Float32Array;
+      for (let i = 0; i < trailCount; i++) {
+        const nextTp = stepCursorTrailParticle(
+          trailParticles[i],
+          i,
+          dt,
+          ptrInfo,
+          cfg.spinSpeed
+        );
+        trailParticles[i] = nextTp;
+        tPosArr[i * 3] = nextTp.x;
+        tPosArr[i * 3 + 1] = nextTp.y;
+        tPosArr[i * 3 + 2] = nextTp.z;
+        tLifeArr[i] = nextTp.life;
+      }
+      trailPosAttr.needsUpdate = true;
+      trailLifeAttr.needsUpdate = true;
+
       renderer.render(scene, camera);
 
       if (elapsedTotal - lastTelemetryTime > 0.35) {
         lastTelemetryTime = elapsedTotal;
         const fluxVal = (4.82 * cfg.spinSpeed * cfg.lensingIntensity * resMult).toFixed(2);
         telemetryCbRef.current?.({
-          activeParticles: particleCount + shardCount,
+          activeParticles: particleCount + trailCount + shardCount,
           horizonFlux: `${fluxVal} × 10^44 erg/s`,
           cursorForce: pointerState.active ? cfg.interactionMode.toUpperCase() : 'EQUILIBRIUM',
         });
@@ -976,6 +1154,7 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       isDisposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      resizeObserver.disconnect();
       window.removeEventListener('resize', onResize);
       domElem.removeEventListener('pointermove', onPointerMove);
       domElem.removeEventListener('pointerleave', onPointerLeave);
@@ -983,16 +1162,18 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
 
       backdropGeo.dispose();
       backdropMat.dispose();
-      crustGeo.dispose();
-      crustMat.dispose();
-      magmaRimGeo.dispose();
-      magmaRimMat.dispose();
+      primaryRockGeo.dispose();
+      primaryRockMat.dispose();
+      emberVeinGeo.dispose();
+      emberVeinMat.dispose();
       satelliteShardGeo.dispose();
       satelliteShardMat.dispose();
       shardGeo.dispose();
       shardMat.dispose();
       particlesGeo.dispose();
       particlesMat.dispose();
+      trailGeo.dispose();
+      trailMat.dispose();
       renderer.dispose();
     };
   }, []);
