@@ -1,0 +1,6 @@
+{
+  "name": "Mertana — Relativistic Singularity",
+  "description": "Interactive Three.js homepage featuring the Mertana relativistic black hole in motion, gravitational lensing shaders, and interactive particle dynamics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
