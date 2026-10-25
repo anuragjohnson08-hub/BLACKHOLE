@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+!gh-pages-bundle.*
+!docs/
+!.nojekyll

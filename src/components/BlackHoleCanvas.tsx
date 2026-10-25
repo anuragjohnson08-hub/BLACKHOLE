@@ -3,6 +3,8 @@ import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
   computeGentleBlackHoleRotation,
+  computePortalCutsceneState,
+  computeScrollChoreography,
   stepCursorTrailParticle,
   stepParticleKinematics,
   type CursorTrailParticle,
@@ -14,6 +16,8 @@ interface BlackHoleCanvasProps {
   config: SimulationConfig;
   shockwaveTrigger: number;
   activePillarMultiplier: number;
+  scrollDataRef: React.MutableRefObject<{ progress: number; velocity: number }>;
+  portalProgressRef?: React.MutableRefObject<number>;
   onTelemetryUpdate?: (stats: {
     activeParticles: number;
     horizonFlux: string;
@@ -40,12 +44,12 @@ const GARGANTUA_VERTEX_SHADER = `
 `;
 
 /**
- * Calibrated Relativistic Gargantua Fragment Shader with Gentle Rotating Motion
- * & Interactive Cursor Vortex Lensing:
- * - Smooth, unhurried azimuthal rotation of the gravitational lensing rings (uLensingAngle)
- * - Gentle, majestic drift of the diagonal accretion plasma filaments (uAccretionPhase)
- * - Interactive cursor swirl eddy & gravitational micro-lensing around uPointer
- * - Unobstructed bottom-right molten exoplanet limb with glowing volcanic fissures
+ * Calibrated Relativistic Gargantua Fragment Shader with:
+ * - 1:1 Isotropic Circular Event Horizon & Dual Photon Rings at all aspect ratios
+ * - Smooth, Gentle Azimuthal Rotation (uLensingAngle & uAccretionPhase)
+ * - Scroll-Driven Event Horizon Zoom (uZoomScale) & Disk Tilt Interpolation (uTiltRad)
+ * - Scroll-Velocity Relativistic Warp Streaks (uWarpFactor)
+ * - Interactive Cursor Swirl Eddy & Micro-Lensing around uPointer
  */
 const GARGANTUA_FRAGMENT_SHADER = `
   precision highp float;
@@ -61,8 +65,13 @@ const GARGANTUA_FRAGMENT_SHADER = `
   uniform float uLensingIntensity;
   uniform float uTurbulence;
   uniform float uTiltRad;
+  uniform float uZoomScale;
+  uniform float uWarpFactor;
   uniform float uShockwave;
   uniform float uResonance;
+  uniform float uCoreTwist;
+  uniform float uCorePressureGlow;
+  uniform float uPortalFlash;
 
   float hash21(vec2 p) {
     p = fract(p * vec2(234.34, 435.345));
@@ -95,13 +104,16 @@ const GARGANTUA_FRAGMENT_SHADER = `
 
   void main() {
     float aspect = uResolution.x / max(uResolution.y, 1.0);
-    vec2 centerUv = vec2(0.495, 0.465);
-    // Because vUv spans the exact viewport [0..1], multiplying x by aspect makes 1 unit in p.x
-    // equal the exact same number of pixels as 1 unit in p.y on any screen or fullscreen monitor.
-    vec2 p = (vUv - centerUv) * vec2(aspect, 1.0) * 2.0;
+    // Smoothly center the black hole vertically as user scrolls deeper into chapters
+    float centerShiftY = mix(0.465, 0.50, clamp((uZoomScale - 1.0) * 1.2, 0.0, 1.0));
+    vec2 centerUv = vec2(0.495, centerShiftY);
+
+    // Isotropic screen coordinates scaled by scroll zoom (uZoomScale: 1.0 -> 1.96)
+    vec2 rawP = (vUv - centerUv) * vec2(aspect, 1.0) * 2.0;
+    vec2 p = rawP / max(0.5, uZoomScale);
 
     // Interactive cursor gravitational swirl & micro-lensing distortion
-    vec2 ptr = (uPointer - centerUv) * vec2(aspect, 1.0) * 2.0;
+    vec2 ptr = ((uPointer - centerUv) * vec2(aspect, 1.0) * 2.0) / max(0.5, uZoomScale);
     vec2 toPtr = p - ptr;
     float ptrDist = length(toPtr);
     if (uPointerActive > 0.01) {
@@ -111,7 +123,7 @@ const GARGANTUA_FRAGMENT_SHADER = `
       p -= (radialDir * 0.65 - tangentDir * 0.75) * pull;
     }
 
-    // Rotate into black hole accretion frame (with gentle precession tilt)
+    // Rotate into black hole accretion frame (with scroll tilt + gentle precession)
     float c = cos(uTiltRad);
     float s = sin(uTiltRad);
     vec2 q = vec2(p.x * c + p.y * s, -p.x * s + p.y * c);
@@ -125,11 +137,19 @@ const GARGANTUA_FRAGMENT_SHADER = `
     vec2 starCell = floor(p * 115.0);
     vec2 starFract = fract(p * 115.0) - 0.5;
     float starSeed = hash21(starCell);
-    if (starSeed > 0.986 && r > 0.36) {
+    if (starSeed > 0.986 && r > 0.42) {
       float dStar = length(starFract);
       float starDot = exp(-dStar * dStar * 95.0);
       float twinkle = 0.65 + 0.35 * sin(uTime * 1.4 + starSeed * 120.0);
       col += vec3(0.96, 0.91, 0.82) * starDot * twinkle * 0.75;
+    }
+
+    // Scroll-velocity radial warp streaks in deep space outside the shadow
+    if (uWarpFactor > 0.08 && r > 0.43) {
+      float warpTheta = atan(rawP.y, rawP.x);
+      float streakSeed = noise2D(vec2(warpTheta * 42.0, r * 6.0 - uTime * 4.5));
+      float streakMask = smoothstep(0.72, 0.98, streakSeed) * smoothstep(0.43, 0.95, r);
+      col += vec3(1.0, 0.82, 0.46) * streakMask * min(1.0, uWarpFactor * 0.45);
     }
 
     // =========================================================================
@@ -137,10 +157,8 @@ const GARGANTUA_FRAGMENT_SHADER = `
     // =========================================================================
     vec2 haloQ = q;
     float rHalo = length(haloQ);
-    // Rotate polar coordinates smoothly around the black hole axis
     float rotatedTheta = atan(haloQ.y, haloQ.x) - uLensingAngle;
 
-    // Periodic azimuthal coordinates so the rotating ring has zero seam
     vec2 polarUv = vec2(
       cos(rotatedTheta) * 2.2 + rHalo * 12.0,
       sin(rotatedTheta) * 2.2 - rHalo * 12.0
@@ -148,7 +166,6 @@ const GARGANTUA_FRAGMENT_SHADER = `
     float azimFlow = fbm(polarUv + vec2(uAccretionPhase * 0.35, -uAccretionPhase * 0.25));
     float fineGrooves = 0.52 + 0.48 * sin(rHalo * 210.0 + azimFlow * 5.2 - uLensingAngle * 2.0);
     float medGrooves = 0.55 + 0.45 * cos(rHalo * 78.0 - azimFlow * 3.6 + uLensingAngle);
-    // Subtle rotating luminous plasma wave around the ring circumference
     float orbitalWave = 0.84 + 0.16 * sin(rotatedTheta * 2.0 + rHalo * 14.0);
     float ringPattern = mix(0.35, 1.35, fineGrooves * medGrooves) * orbitalWave;
 
@@ -181,21 +198,43 @@ const GARGANTUA_FRAGMENT_SHADER = `
     col += vec3(1.0, 0.94, 0.82) * (photonRingOuter + photonRingInner) * uLensingIntensity;
 
     // =========================================================================
-    // 3. DIAGONAL EQUATORIAL ACCRETION DISK (Smooth, Unhurried Plasma Flow)
+    // 3. DIAGONAL EQUATORIAL ACCRETION DISK & S-CURVE CORE PRESSURE TORSION
     // =========================================================================
-    float diskY = q.y + 0.052 - 0.010 * q.x * q.x;
+    // Differential frame-dragging centered directly on the equatorial beam axis (0.0, -0.052)
+    // twists the straight core line into a tight S-curve vortex pinch under gravitational
+    // pressure (matching the reference image) while keeping outer photon rings 1:1 circular
+    vec2 beamCenter = vec2(0.0, -0.052);
+    vec2 relQ = q - beamCenter;
+    float dCore = length(relQ);
+
+    // Gaussian radial vortex falloff inside the event horizon core (dCore < 0.36)
+    float coreFalloff = exp(-dCore * dCore * 38.0) * smoothstep(0.38, 0.04, dCore);
+    // Clockwise differential rotation (~125 deg at peak twist) + radial inward pinch pull
+    float twistTheta = uCoreTwist * 2.18 * coreFalloff;
+    float ct = cos(twistTheta);
+    float st = sin(twistTheta);
+    vec2 twistedRelQ = vec2(relQ.x * ct - relQ.y * st, relQ.x * st + relQ.y * ct);
+
+    // Subtle radial inward suction toward the pinch point at max twist
+    twistedRelQ *= 1.0 + 0.32 * clamp(uCoreTwist, 0.0, 1.4) * exp(-dCore * dCore * 52.0);
+
+    vec2 diskQ = twistedRelQ + beamCenter;
+
+    // Magnetic Z-pinch narrows the core beam waist right at the S-curve inflection point
+    float corePinch = 1.0 - 0.58 * clamp(uCoreTwist, 0.0, 1.2) * exp(-dCore * dCore * 75.0);
+
+    float diskY = diskQ.y + 0.052 - 0.010 * diskQ.x * diskQ.x;
 
     float wingSpread = smoothstep(0.32, 1.35, abs(q.x));
     float shoulderFlare = exp(-pow((abs(q.x) - 0.49) / 0.16, 2.0));
-    float halfThick = 0.021 + 0.078 * wingSpread + 0.025 * shoulderFlare;
+    float halfThick = (0.021 + 0.078 * wingSpread + 0.025 * shoulderFlare) * max(0.30, corePinch);
 
     float coreBeam = exp(-pow(diskY / (halfThick * 0.52), 2.0));
     float wingSheet = exp(-pow(diskY / (halfThick * 1.65), 2.0)) * (0.32 + 0.55 * wingSpread);
 
-    // Gentle, hypnotic orbital drift along the accretion plane
     vec2 flowCoord = vec2(
-      q.x * 3.2 - uAccretionPhase * 1.15,
-      diskY / max(halfThick, 0.015) * 2.2 + fbm(vec2(q.x * 4.2 - uAccretionPhase * 0.65, diskY * 12.0)) * 1.15
+      diskQ.x * 3.2 - uAccretionPhase * 1.15,
+      diskY / max(halfThick, 0.010) * 2.2 + fbm(vec2(diskQ.x * 4.2 - uAccretionPhase * 0.65, diskY * 12.0)) * 1.15
     );
     float filaments = fbm(flowCoord * vec2(2.4, 5.0));
     float fineFibers = noise2D(flowCoord * vec2(7.5, 18.0) - vec2(uAccretionPhase * 1.5, 0.0));
@@ -221,6 +260,15 @@ const GARGANTUA_FRAGMENT_SHADER = `
     diskColor = mix(diskColor, coreWhite, pow(clamp(diskIntensity * 0.62, 0.0, 1.0), 2.0));
 
     col += diskColor * diskIntensity;
+
+    // White-hot core compression glow along the S-curve pinch point under max gravitational pressure
+    if (uCorePressureGlow > 0.01) {
+      float sCurveSpine = exp(-pow(diskY / max(0.004, halfThick * 0.36), 2.0)) * exp(-dCore * dCore * 22.0);
+      float pinchFocal = exp(-dCore * dCore * 68.0) * (0.80 + 0.20 * sin(uTime * 9.5));
+      float compressionEnergy = (sCurveSpine * 1.10 + pinchFocal * 1.35) * uCorePressureGlow;
+      vec3 pinchColor = mix(vec3(1.0, 0.78, 0.36), vec3(1.0, 0.99, 0.96), clamp(compressionEnergy * 0.85, 0.0, 1.0));
+      col += pinchColor * compressionEnergy * 1.40;
+    }
 
     // =========================================================================
     // 4. LOWER-RIGHT TIDAL DUST NEBULA, EMBER SPARKS & ORGANIC DEBRIS SILHOUETTES
@@ -261,10 +309,12 @@ const GARGANTUA_FRAGMENT_SHADER = `
 
     // =========================================================================
     // 5. FOREGROUND MOLTEN EXOPLANET LIMB (Anchored to Bottom-Right Corner)
+    // Parallax recedes slightly downward/right as viewer zooms into the black hole
     // =========================================================================
-    vec2 planetCenter = vec2(aspect * 0.90 + 0.36, -1.34);
+    float planetParallax = (uZoomScale - 1.0) * 0.38;
+    vec2 planetCenter = vec2(aspect * 0.90 + 0.36 + planetParallax, -1.34 - planetParallax);
     float planetRadius = 1.12;
-    vec2 toPlanet = p - planetCenter;
+    vec2 toPlanet = rawP - planetCenter;
     float distPlanet = length(toPlanet);
 
     if (distPlanet < planetRadius + 0.05) {
@@ -291,7 +341,7 @@ const GARGANTUA_FRAGMENT_SHADER = `
         vec3 surf = mix(obsidianCrust, burntSienna, ndotl * 0.9 + bands * 0.38);
         surf = mix(surf, brightMagma, magmaStreak * (0.42 + 0.65 * ndotl));
 
-        float hotspot = smoothstep(0.68, 0.90, cracks) * smoothstep(-0.55, -0.98, p.y);
+        float hotspot = smoothstep(0.68, 0.90, cracks) * smoothstep(-0.55, -0.98, rawP.y);
         surf += vec3(1.0, 0.62, 0.18) * hotspot * 1.15;
 
         float limbEdge = smoothstep(planetRadius, planetRadius - 0.014, distPlanet);
@@ -303,9 +353,9 @@ const GARGANTUA_FRAGMENT_SHADER = `
     // 6. SHOCKWAVE PULSE & INTERACTIVE CURSOR SWIRL VORTEX GLOW
     // =========================================================================
     if (uShockwave > 0.001 && uShockwave < 0.999) {
-      float waveR = 0.35 + uShockwave * 1.25;
+      float waveR = 0.42 + uShockwave * 1.25;
       float ringWave = exp(-pow((r - waveR) / 0.028, 2.0)) * (1.0 - uShockwave);
-      col += vec3(1.0, 0.85, 0.48) * ringWave * 1.15;
+      col += vec3(1.0, 0.85, 0.48) * ringWave * 1.25;
     }
 
     if (uPointerActive > 0.01) {
@@ -318,6 +368,14 @@ const GARGANTUA_FRAGMENT_SHADER = `
     }
 
     col = col / (1.0 + col * 0.22);
+
+    // Singularity Portal Transition Cutscene White-Out Flash
+    if (uPortalFlash > 0.001) {
+      float flashRadius = exp(-r * r * mix(10.0, 0.25, uPortalFlash));
+      vec3 flashTint = mix(vec3(1.0, 0.84, 0.46), vec3(1.0, 0.99, 0.97), uPortalFlash);
+      float flashMix = clamp(flashRadius * uPortalFlash * 1.4 + pow(uPortalFlash, 2.1), 0.0, 1.0);
+      col = mix(col, flashTint, flashMix);
+    }
 
     gl_FragColor = vec4(col, 1.0);
   }
@@ -333,16 +391,18 @@ const PARTICLE_VERTEX_SHADER = `
 
   uniform float uTime;
   uniform float uPixelRatio;
+  uniform float uWarpBoost;
 
   void main() {
-    vHeat = aHeat;
+    vHeat = min(1.0, aHeat + uWarpBoost * 0.25);
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     float dist = max(1.0, -mvPosition.z);
 
     float twinkle = 0.78 + 0.22 * sin(uTime * 3.2 + aPhase * 6.2831);
-    vAlpha = twinkle * smoothstep(22.0, 3.0, dist);
+    vAlpha = twinkle * smoothstep(22.0, 2.5, dist);
 
-    gl_PointSize = clamp((aSize * uPixelRatio * 22.0) / dist, 1.2, 18.0);
+    float warpSize = 1.0 + uWarpBoost * 0.45;
+    gl_PointSize = clamp((aSize * warpSize * uPixelRatio * 22.0) / dist, 1.2, 22.0);
     gl_Position = projectionMatrix * mvPosition;
   }
 `;
@@ -373,9 +433,6 @@ const PARTICLE_FRAGMENT_SHADER = `
   }
 `;
 
-/**
- * Shaders for the Interactive Cursor Swirl & Trail Particle Ribbon
- */
 const TRAIL_VERTEX_SHADER = `
   attribute float aLife;
   attribute float aSize;
@@ -389,7 +446,6 @@ const TRAIL_VERTEX_SHADER = `
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     float dist = max(1.0, -mvPosition.z);
 
-    // Trail particles bloom when freshly spawned and taper smoothly as they swirl
     float lifeScale = sin(clamp(aLife, 0.0, 1.0) * 3.14159);
     gl_PointSize = clamp((aSize * (0.4 + 0.9 * lifeScale) * uPixelRatio * 26.0) / dist, 0.0, 24.0);
     gl_Position = projectionMatrix * mvPosition;
@@ -411,7 +467,6 @@ const TRAIL_FRAGMENT_SHADER = `
     float glow = smoothstep(0.5, 0.0, d) * 0.6;
     float intensity = (core + glow) * smoothstep(0.0, 0.2, vLife);
 
-    // Color transitions from incandescent diamond-ivory at cursor to golden-amber to warm crimson ember
     vec3 tailEmber = vec3(0.92, 0.32, 0.08);
     vec3 midGold = vec3(1.0, 0.78, 0.32);
     vec3 headIvory = vec3(1.0, 0.98, 0.92);
@@ -427,6 +482,8 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
   config,
   shockwaveTrigger,
   activePillarMultiplier,
+  scrollDataRef,
+  portalProgressRef,
   onTelemetryUpdate,
   onCanvasBurst,
 }) => {
@@ -476,11 +533,23 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
     const width = container.clientWidth || window.innerWidth;
     const height = container.clientHeight || window.innerHeight;
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: !isSoftwareGl,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: true,
-    });
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({
+        antialias: !isSoftwareGl,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: true,
+      });
+    } catch {
+      try {
+        renderer = new THREE.WebGLRenderer({
+          antialias: false,
+          preserveDrawingBuffer: false,
+        });
+      } catch {
+        return;
+      }
+    }
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.08;
@@ -537,8 +606,13 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       uLensingIntensity: { value: configRef.current.lensingIntensity },
       uTurbulence: { value: configRef.current.particleTurbulence },
       uTiltRad: { value: initialRot.precessionTiltRad },
+      uZoomScale: { value: 1.0 },
+      uWarpFactor: { value: 0.0 },
       uShockwave: { value: 0.0 },
       uResonance: { value: pillarMultRef.current },
+      uCoreTwist: { value: 0.0 },
+      uCorePressureGlow: { value: 0.0 },
+      uPortalFlash: { value: 0.0 },
     };
 
     const backdropMat = new THREE.ShaderMaterial({
@@ -556,8 +630,7 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
     scene.add(backdropMesh);
 
     // =========================================================================
-    // B. COMPOSITE 3D TIDAL METEOROID CLUSTER (THREE.Group, 4 distinct parts)
-    // Positioned in the lower-right tidal stream without occluding the planet limb
+    // B. COMPOSITE 3D TIDAL METEOROID CLUSTER (THREE.Group, 3 distinct parts)
     // =========================================================================
     const meteoroidGroup = new THREE.Group();
     meteoroidGroup.position.set(1.65, -1.45, 0.35);
@@ -731,6 +804,7 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       uniforms: {
         uTime: { value: 0 },
         uPixelRatio: { value: pixelRatio },
+        uWarpBoost: { value: 0 },
       },
       vertexShader: PARTICLE_VERTEX_SHADER,
       fragmentShader: PARTICLE_FRAGMENT_SHADER,
@@ -762,7 +836,7 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         vx: 0,
         vy: 0,
         vz: 0,
-        life: 0, // Staggered activation when pointer moves
+        life: 0,
         maxLife,
         size: sz,
         swirlPhase: i * 0.45,
@@ -856,7 +930,6 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         pointerState.worldY = _vec3A.y;
         pointerState.worldZ = _vec3A.z;
 
-        // Immediately spawn swirling trail particles along the cursor trajectory
         emitCursorTrailBurst(14, 1.0);
       }
     };
@@ -876,7 +949,6 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       updatePointerFromClient(e.clientX, e.clientY);
       shockwaveRef.current = 0.005;
 
-      // Spawn a rich swirlingnova burst of trail particles on click
       emitCursorTrailBurst(64, 2.1);
 
       for (let i = 0; i < particleCount; i++) {
@@ -914,13 +986,15 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
     resizeObserver.observe(container);
 
     // =========================================================================
-    // G. ANIMATION LOOP WITH GENTLE ROTATION & SOFTWARE-WEBGL `afterDraw` PACING
+    // G. ANIMATION LOOP WITH SCROLL CHOREOGRAPHY & `afterDraw` PACING
     // =========================================================================
     let frameId = 0;
     let isDisposed = false;
     const clock = new THREE.Clock();
     let elapsedTotal = 1.4;
     let lastTelemetryTime = 0;
+    let smoothedScrollProgress = scrollDataRef.current.progress;
+    let smoothedScrollVelocity = 0;
 
     function afterDraw(cb: () => void) {
       const gl = renderer.getContext() as WebGL2RenderingContext;
@@ -943,6 +1017,10 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       }
     }
 
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
     function tick() {
       if (isDisposed) return;
       const rawDelta = clock.getDelta();
@@ -952,6 +1030,39 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       const cfg = configRef.current;
       const resMult = pillarMultRef.current;
 
+      // Smoothly interpolate scroll progress & velocity
+      smoothedScrollProgress = THREE.MathUtils.damp(
+        smoothedScrollProgress,
+        scrollDataRef.current.progress,
+        7,
+        dt
+      );
+      smoothedScrollVelocity = THREE.MathUtils.damp(
+        smoothedScrollVelocity,
+        scrollDataRef.current.velocity,
+        9,
+        dt
+      );
+      // Decay raw velocity ref so warp settles smoothly when scrolling stops
+      scrollDataRef.current.velocity *= 0.86;
+
+      const scrollChoreo = computeScrollChoreography(
+        smoothedScrollProgress,
+        smoothedScrollVelocity
+      );
+
+      // Evaluate 3D Singularity Portal Transition Cutscene state if active
+      const portalProgress = portalProgressRef?.current ?? 0;
+      const portalState = computePortalCutsceneState(portalProgress);
+
+      const combinedZoomScale = scrollChoreo.zoomScale * portalState.zoomBoost;
+      const combinedWarpFactor = Math.max(scrollChoreo.warpFactor, portalState.warpBoost);
+      const combinedCoreTwist = scrollChoreo.coreTwist + portalState.twistBoost;
+      const combinedPressureGlow = Math.min(
+        1.85,
+        scrollChoreo.corePressureGlow + portalState.twistBoost * 0.45
+      );
+
       if (shockwaveRef.current > 0) {
         shockwaveRef.current += dt * 0.75;
         if (shockwaveRef.current >= 1.0) {
@@ -959,11 +1070,12 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         }
       }
 
-      // Compute smooth, gentle rotation & precession for the black hole
+      // Compute smooth, gentle rotation & scroll-interpolated disk tilt
+      const effectiveTiltDeg = cfg.diskTiltDeg + scrollChoreo.tiltDegOffset;
       const rotState = computeGentleBlackHoleRotation(
         elapsedTotal,
-        cfg.spinSpeed,
-        cfg.diskTiltDeg
+        cfg.spinSpeed * (1.0 + combinedWarpFactor * 0.35),
+        effectiveTiltDeg
       );
 
       gargantuaUniforms.uTime.value = elapsedTotal;
@@ -977,7 +1089,7 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       );
       gargantuaUniforms.uLensingIntensity.value = THREE.MathUtils.damp(
         gargantuaUniforms.uLensingIntensity.value,
-        cfg.lensingIntensity,
+        cfg.lensingIntensity * scrollChoreo.lensingBoost * (1.0 + portalProgress * 0.45),
         6,
         dt
       );
@@ -993,6 +1105,11 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         6,
         dt
       );
+      gargantuaUniforms.uZoomScale.value = combinedZoomScale;
+      gargantuaUniforms.uWarpFactor.value = combinedWarpFactor;
+      gargantuaUniforms.uCoreTwist.value = combinedCoreTwist;
+      gargantuaUniforms.uCorePressureGlow.value = combinedPressureGlow;
+      gargantuaUniforms.uPortalFlash.value = portalState.flashIntensity;
       gargantuaUniforms.uPointer.value.x = THREE.MathUtils.damp(
         gargantuaUniforms.uPointer.value.x,
         pointerState.normX,
@@ -1019,30 +1136,41 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
         dt
       );
 
-      // Decay pointer velocity smoothly when cursor is stationary
       pointerState.vx *= 0.88;
       pointerState.vy *= 0.88;
 
-      // Subtle camera parallax
-      const targetCamX = pointerState.active ? (pointerState.normX - 0.5) * 0.32 : 0;
-      const targetCamY = pointerState.active ? (pointerState.normY - 0.5) * 0.22 : 0;
-      camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCamX, 4, dt);
-      camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCamY, 4, dt);
-      camera.lookAt(0, 0, 0);
+      // Subtle high-pressure camera micro-tremor at maximum core twist + portal plunge
+      const tremorAmplitude = prefersReducedMotion
+        ? 0
+        : scrollChoreo.pressureTremor * 0.024 + (portalProgress > 0 ? 0.038 * portalProgress : 0);
+      const tremorX =
+        Math.sin(elapsedTotal * 37.0) * tremorAmplitude +
+        Math.cos(elapsedTotal * 53.0) * tremorAmplitude * 0.5;
+      const tremorY =
+        Math.cos(elapsedTotal * 41.0) * tremorAmplitude +
+        Math.sin(elapsedTotal * 61.0) * tremorAmplitude * 0.5;
 
-      // Gentle rotation of composite 3D meteoroid cluster
+      // Camera zooms into the black hole event horizon as user scrolls down or plunges into portal
+      const targetCamX = (pointerState.active ? (pointerState.normX - 0.5) * 0.32 : 0) + tremorX;
+      const targetCamY = (pointerState.active ? (pointerState.normY - 0.5) * 0.22 : 0) + tremorY;
+      const targetCamZ = Math.max(2.1, scrollChoreo.cameraZ - portalProgress * 3.8);
+      camera.position.x = THREE.MathUtils.damp(camera.position.x, targetCamX, 8, dt);
+      camera.position.y = THREE.MathUtils.damp(camera.position.y, targetCamY, 8, dt);
+      camera.position.z = THREE.MathUtils.damp(camera.position.z, targetCamZ, 6, dt);
+      camera.lookAt(tremorX * 0.35, tremorY * 0.35, 0);
+
       meteoroidGroup.rotation.z = elapsedTotal * 0.12 * cfg.spinSpeed;
       satelliteShard.rotation.x += dt * 0.45;
       satelliteShard.rotation.y += dt * 0.35;
 
       // Update 3D Rocky Debris Shards (InstancedMesh)
-      const tiltR = (cfg.diskTiltDeg * Math.PI) / 180;
+      const tiltR = (effectiveTiltDeg * Math.PI) / 180;
       const cosT = Math.cos(tiltR);
       const sinT = Math.sin(tiltR);
 
       for (let i = 0; i < shardCount; i++) {
         const s = shards[i];
-        s.orbitAngle += dt * s.orbitSpeed * cfg.spinSpeed;
+        s.orbitAngle += dt * s.orbitSpeed * cfg.spinSpeed * (1.0 + scrollChoreo.warpFactor * 0.6);
 
         if (s.isTidalSpray) {
           const localProgress = (Math.sin(s.orbitAngle * 1.1 + i) + 1) * 0.5;
@@ -1065,8 +1193,9 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       }
       shardInstanced.instanceMatrix.needsUpdate = true;
 
-      // Update Interactive 3D Ambient Particle System
+      // Update Interactive 3D Ambient Particle System (with scroll + portal warp acceleration)
       particlesMat.uniforms.uTime.value = elapsedTotal;
+      particlesMat.uniforms.uWarpBoost.value = combinedWarpFactor;
       const ptrInfo = {
         x: pointerState.worldX,
         y: pointerState.worldY,
@@ -1079,18 +1208,23 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       const posArr = posAttr.array as Float32Array;
       const heatArr = heatAttr.array as Float32Array;
 
+      const stepCfg: SimulationConfig = {
+        ...cfg,
+        diskTiltDeg: effectiveTiltDeg,
+      };
+
       for (let i = 0; i < particleCount; i++) {
         const nextP = stepParticleKinematics(
           particleStates[i],
           dt,
-          cfg,
+          stepCfg,
           ptrInfo,
-          shockwaveRef.current
+          shockwaveRef.current,
+          combinedWarpFactor
         );
         particleStates[i] = nextP;
 
         if (i < particleCount * 0.6) {
-          // Lower-right tidal ember spray + interactive cursor swirl offset
           const sprayBias = i / (particleCount * 0.6);
           const spreadX = Math.sin(i * 17.3) * (0.35 + sprayBias * 0.95);
           const spreadY = Math.cos(i * 23.1) * (0.35 + sprayBias * 0.75);
@@ -1133,7 +1267,13 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
 
       if (elapsedTotal - lastTelemetryTime > 0.35) {
         lastTelemetryTime = elapsedTotal;
-        const fluxVal = (4.82 * cfg.spinSpeed * cfg.lensingIntensity * resMult).toFixed(2);
+        const fluxVal = (
+          4.82 *
+          cfg.spinSpeed *
+          cfg.lensingIntensity *
+          scrollChoreo.lensingBoost *
+          resMult
+        ).toFixed(2);
         telemetryCbRef.current?.({
           activeParticles: particleCount + trailCount + shardCount,
           horizonFlux: `${fluxVal} × 10^44 erg/s`,
@@ -1176,13 +1316,13 @@ export const BlackHoleCanvas: React.FC<BlackHoleCanvasProps> = ({
       trailMat.dispose();
       renderer.dispose();
     };
-  }, []);
+  }, [scrollDataRef]);
 
   return (
     <div
       ref={mountRef}
       data-testid="blackhole-webgl-canvas"
-      className="absolute inset-0 w-full h-full cursor-crosshair"
+      className="fixed inset-0 w-full h-full z-0 cursor-crosshair"
       aria-label="Interactive 3D Mertana relativistic black hole and particle simulation canvas"
     />
   );

@@ -1,98 +1,89 @@
-# Mertana — Scroll-Driven Relativistic Scrollytelling
+# Mertana — Relativistic Core Torsion & Singularity Portal Transition Cutscene
 
-Transform the Mertana homepage into a multi-section scrollytelling journey where scrolling propels the viewer toward the black hole's event horizon, dynamically tilts the accretion plane, accelerates cosmic particles into warp streams, and reveals four editorial chapters (`01. Experience`, `02. Consistency`, `03. Quality`, `04. Dedication`).
+As the viewer scrolls from the opening **Mertana** poster hero down toward the final **04 / Dedication** chapter, gravitational frame-dragging twists the central equatorial accretion beam into a tight **S-curve vortex pinch** under extreme pressure—and clicking any destination link triggers a **3D Event Horizon Warp Cutscene** while loading and redirecting to the new page.
 
-## User Review & Critical Decisions
+## User Review & Confirmed Decisions
 
 > [!IMPORTANT]
-> The following design and interaction choices have been confirmed from your answers and govern this implementation:
+> The plan has been updated to include the **Singularity Portal Transition Cutscene** when navigating to a link or new page:
 
-- **3D Black Hole Scroll Choreography**: Scrolling smoothly zooms the Three.js camera and shader scale closer to the Event Horizon while progressively tilting and banking the equatorial accretion disk across chapters.
-- **Full Multi-Section Story**: Beneath the initial Mertana poster hero, four full-viewport scrollytelling chapters (`01. Experience`, `02. Consistency`, `03. Quality`, `04. Dedication`) plus a concluding `Zero-Point Convergence` finale unfold sequentially.
-- **Scroll-Driven Visual Effects**:
-  - **Hero Title Parallax Split & Fade**: The monumental `Mertana` wordmark splits horizontally (`M e r` drifting left/up, `t a n a` drifting right/up) with optical opacity fade as the user leaves the hero viewport.
-  - **Warp-Speed Particle Stream**: Scroll velocity stretches and accelerates the 3D ember and trail particles toward the viewer in a relativistic warp effect that settles back into gentle orbital motion when scrolling pauses.
-  - **Section-Boundary Shockwaves**: Crossing into each new chapter (`Experience`, `Consistency`, `Quality`, `Dedication`) automatically fires a golden relativistic gravitational shockwave ring from the event horizon.
+- **Smooth Scroll-Driven Torsion Progression**: The core accretion line twist builds smoothly from `0%` at `00 Origin` to `100%` maximum S-curve torsion at `04 / Dedication`.
+- **Tight S-Curve Vortex Pinch & Pressure Effects**: Differential rotational frame-dragging bends the inner core line into a tight S-curve vortex pinch with a **white-hot core compression glow** and **subtle high-pressure camera micro-tremor** at the final chapter, while keeping the outer photon rings a `1:1` circle.
+- **3D Transition Cutscene on Link Redirect (New)**:
+  - Intercepts link clicks to play a **2.2-second 3D Singularity Crossing Cutscene** before completing the redirect (or transitioning into an internal destination page).
+  - Includes a prominent **"Enter Singularity Portal →"** action button on the final **04 / Dedication** chapter (plus a customizable destination URL field in the controls and a reusable `triggerPortalRedirect(url, label)` helper so you can attach the cutscene to any link).
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: Combines the iconic `Mertana` poster hero at the top of the page (`scrollProgress = 0`) with a continuous 5-stage vertical scroll narrative (`500vh` total scroll runway) over a fixed, interactive Three.js WebGL canvas.
-- **Target Audience / Persona**: Visitors exploring Mertana's brand manifesto who expect a high-craft, cinema-grade WebGL storytelling experience with tactile cursor and scroll responsiveness.
-- **Key Value**: Preserves the exact initial reference poster composition at the top of the page while rewarding scrolling with deep 3D spatial progression, interactive chapter navigation, and physical particle feedback.
+- **What It Does**:
+  1. **Scroll Pressure Climax**: Progressively twists the black hole's equatorial core beam into a high-pressure S-curve vortex pinch as the user reaches the final page.
+  2. **Cinematic Link Transition Cutscene**: When a user clicks a link to visit a new page, the 3D camera dives straight through the twisted S-curve core into a relativistic warp tunnel with loading telemetry (`0% – 100%`), culminating in a white-hot singularity flash right as the new page loads.
+- **Target Audience / Persona**: Visitors and creators who want seamless, movie-grade WebGL continuity between the 3D landing experience and downstream pages or external links.
+- **Key Value**: Eliminates abrupt browser page jumps by turning every link navigation into an interactive 3D wormhole transit sequence.
 
 ---
 
 ## 2. User Experience & Visual Design
 
 - **Key User Flows**:
-  1. **Stage 0 — The Singularity Hero (`0% – 15%` Scroll)**: Opens on the exact Mertana poster layout (`Mertana` full-width wordmark, `IN CREDIABLE ENERGY`, interactive pillar links, `©2026`, `RIDE, BOND, GROW`). Clicking any of the four pillar links (`Experience +`, `Consistency +`, `Quality +`, `Dedication +`) smoothly scrolls directly to that chapter.
-  2. **Hero Departure (`5% – 22%` Scroll)**: As the user scrolls down, the monumental `Mertana` letters parallax apart and fade smoothly using compositor-only `transform` and `opacity`, clearing the upper viewport so the black hole takes center stage.
-  3. **Stages 1–4 — The Four Pillar Chapters (`20% – 88%` Scroll)**:
-     - **01. Experience — Relativistic Depth**: The black hole zooms in (`1.22×`), tilting to `-14°`. Editorial card on the left presents horizon stability metrics and spatial narrative.
-     - **02. Consistency — Invariant Orbital Momentum**: The black hole zooms deeper (`1.45×`), tilting to `-6°` with heightened golden ring striations. Editorial block on the right highlights angular momentum conservation (`0.998 c`).
-     - **03. Quality — Photon-Ring Clarity**: Close-up inspection of the dual inner photon rings (`1.70×` zoom, `+4°` tilt) with spectral fidelity metrics (`4.21 R_s`).
-     - **04. Dedication — Singularity Focus**: Deepest approach to the Event Horizon (`1.95×` zoom, `+12°` tilt) culminating in the `"It starts and ends with a zero"` manifesto and a `"Return to Singularity Origin"` action that smoothly scrolls back to top.
+  1. **Scroll Descent (`0% -> 100%` Scroll)**: The central accretion line gradually twists into a tight S-curve vortex pinch with a white-hot core flare and subtle high-pressure tremor at **04 / Dedication**.
+  2. **Triggering a Link Redirect Cutscene**:
+     - The user clicks **"Enter Singularity Portal →"** on the final chapter (or any portal link in the header/chapters).
+     - **Stage 1 — Core Overdrive (`0.0s – 0.7s`)**: UI overlays smoothly retract; the S-curve core twist tightens rapidly (`180%+` torsion) and emits an inward gravitational implosion wave.
+     - **Stage 2 — Relativistic Warp Plunge (`0.7s – 1.7s`)**: The 3D camera accelerates rapidly into the event horizon (`1.96x -> 6.8x` zoom), stretching 3D orbital debris and stars into golden-white hyper-streaks while a minimal HUD displays `SINGULARITY TRANSIT // LOADING DESTINATION [0% → 100%]`.
+     - **Stage 3 — White-Hot Horizon Flash & Redirect (`1.7s – 2.2s`)**: The white-hot pinch core expands into a full-screen ivory-gold flash and seamlessly redirects to the target URL (or opens the built-in Destination Portal view with a one-click return cutscene).
 - **Visual Identity & Theme**:
-  - *Aesthetic Direction*: High-contrast cosmic editorial brutalism paired with relativistic astrophysics visualization.
-  - *Color Palette & Mood*: Deep obsidian void (`#050507`), warm bone ivory (`#EBE6DC`), incandescent photon gold (`#FFB84D`), Doppler amber (`#F58220`), and burnt crimson-orange (`#D94E28`).
-  - *Typography & Hierarchy*: `Archivo` (800 weight) for the monumental hero wordmark and chapter numerals (`01`–`04`); `Plus Jakarta Sans` for chapter prose; `JetBrains Mono` (`tabular-nums`) for relativistic telemetry and scroll depth coordinates.
-  - *Component Styling & Layout*: Alternating asymmetric chapter alignments (left-aligned vs. right-aligned editorial containers, `max-w-lg`) so the central 3D black hole and photon rings remain unobstructed throughout the entire scroll journey.
+  - *Color Palette*:
+    - `--background`: `#030201` (Abyssal Obsidian Void)
+    - `--primary`: `#FFB84D` (Relativistic Photon Gold)
+    - `--accent`: `#F58220` (Accretion Plasma Orange)
+    - `--core-pinch`: `#FFFDF9` (White-Hot Singularity Flash)
+  - *Typography*: `Archivo` display headers, `Plus Jakarta Sans` body prose, and `JetBrains Mono` tabular cutscene telemetry.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Fixed WebGL Viewport with Scroll-Linked Uniforms & Kinematics**
-  - *Chosen Approach*: Keep the Three.js `<canvas>` fixed (`fixed inset-0`) while a semantic `<main>` scroll container drives normalized `scrollProgress` (`0..1`) and `scrollVelocity` into the render loop via mutable refs.
-  - *Why*: Guarantees 60fps compositor-smooth scrolling with zero React re-render overhead per scroll tick, while keeping all chapter headings, metrics, and navigation links natively accessible in the DOM.
-  - *Alternatives Considered*: Updating React state on every `scroll` event was rejected because high-frequency React re-renders contend with WebGL frame pacing.
-- **Decision 2: Velocity-Coupled Warp Stream & Chapter Crossing Detector**
-  - *Chosen Approach*: Compute smoothed `scrollVelocity` inside the physics module to stretch particle Z-velocities and radial outward warp during active scrolling, and trigger an automatic shockwave pulse whenever the active chapter index (`0..4`) changes.
-  - *Why*: Creates a visceral sense of physical propulsion through space during scrolling while punctuating each chapter arrival with a luminous golden wave.
+- **Decision 1: Differential Frame-Dragging on Accretion Coordinates Only**
+  - *Chosen Approach*: Apply the radially decaying S-curve rotational warp (`thetaTwist(r)`) and transverse pinch exclusively to the inner accretion disk coordinates (`r < 0.42`), keeping the outer photon ring coordinates unwarped.
+  - *Why*: Matches the exact S-curve core twist in your reference image while keeping the black hole's outer silhouette an exact `1:1` circle.
+- **Decision 2: Universal Portal Link Interceptor & Custom URL Support**
+  - *Chosen Approach*: Provide a `triggerPortalRedirect(targetUrl, destinationTitle)` handler wired to the chapter CTA buttons and a configurable destination URL setting in the Singularity Controls drawer, plus an interactive in-app Destination Horizon view when no external URL is specified.
+  - *Why*: Lets you immediately test and experience the full transition cutscene right inside the preview AND easily point any link to an external URL or subpage.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
-- **Architecture & Component Diagram**:
+### Architecture & Cutscene State Machine Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                     Scroll Container & Chapter DOM                      │
-│  ┌───────────────────┐  ┌────────────────────────────────────────────┐  │
-│  │ Stage 0: Hero     │  │ Stages 1–4: Editorial Chapters             │  │
-│  │ • Mertana Split   │  │ • 01. Experience   • 03. Quality           │  │
-│  │ • Pillar Nav ─────┼──┼─► Smooth ScrollTo  • 02. Consistency       │  │
-│  │ • Manifesto       │  │                    • 04. Dedication        │  │
-│  └─────────┬─────────┘  └──────────────────────┬─────────────────────┘  │
-└────────────┼───────────────────────────────────┼────────────────────────┘
-             │ Native Scroll Events (Passive)    │ Intersection / Threshold
-             ▼                                   ▼
+│             Scroll Listener  &  Portal Link Click Interceptor           │
+│   • Scroll Progress (0..1) ──► S-Curve Core Twist & Pressure Tremor     │
+│   • Link Click (targetUrl) ──► Starts 2.2s Warp Transition Cutscene     │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                Scroll Choreography & Physics Engine                     │
-│  • computeScrollChoreography(scrollProgress, scrollVelocity)            │
-│    ├─► Camera Zoom / Shadow Scale (1.0x ──► 1.95x)                      │
-│    ├─► Disk Tilt Interpolation (-21.5° ──► +12.0°)                      │
-│    ├─► Hero Title Split Offset & Opacity                                │
-│    └─► Chapter Index Detection (0..4) ──► Auto Shockwave Trigger        │
-└────────────────────────────────────┬────────────────────────────────────┘
-                                     │ Mutable Ref Bridge (Zero GC)
-                                     ▼
+│               Choreography & Cutscene Kinematics Engine                 │
+│  • coreTwist:        0.00 ──► 1.00 (Scroll) ──► 1.85 (Cutscene Surge)   │
+│  • zoomScale:        1.00 ──► 1.96 (Scroll) ──► 6.80 (Horizon Plunge)   │
+│  • warpFactor:       0.00 ──► 2.60 (Scroll) ──► 4.80 (Hyper-Streaks)    │
+│  • portalFlash:      0.00 ────────────────────► 1.00 (White-Out Peak)   │
+└───────────────────────────────────┬─────────────────────────────────────┘
+                                    │
+                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│             Fixed Three.js WebGL Canvas (BlackHoleCanvas)               │
-│  • Isotropic NDC Gargantua Shader (Zoom, Tilt, Lensing, Shockwave)      │
-│  • 1,500 Orbital & Ember Particles + Scroll Warp Velocity Boost         │
-│  • 420 Interactive Cursor Swirl & Comet Trail Particles                 │
-│  • Collapsible Bottom Physics & Telemetry Dock                          │
+│            Three.js WebGL Shader & Cutscene HUD Overlay                 │
+│  1. S-Curve Vortex Pinch Shader (uCoreTwist, uCorePressure, uPortal)    │
+│  2. Cutscene Telemetry Overlay (Destination Label + 0–100% Progress)    │
+│  3. Completion Handler ──► window.location.assign(url) or Portal View   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Data Model & State**:
-  - `ScrollState`: Tracks normalized `progress` (`0..1`), smoothed `velocity` (`-1..+1`), and `activeChapterIndex` (`0` = Hero, `1` = Experience, `2` = Consistency, `3` = Quality, `4` = Dedication).
-  - `ScrollChoreographyOutput`: Pure deterministic output containing `zoomScale`, `tiltDeg`, `lensingBoost`, `warpFactor`, `heroSplitPx`, `heroOpacity`, and `chapterIndex`.
-- **Interactive Component & State Mapping**:
-  - **Hero Pillar Buttons (`Experience +`, `Consistency +`, `Quality +`, `Dedication +`)**: Clicking any button smoothly scrolls the viewport to that chapter's section anchor (`#chapter-experience`, etc.) and triggers a chapter resonance shockwave.
-  - **Window Scroll Listener**: Updates `scrollRef` passively and updates `activeChapterIndex` only when crossing a chapter threshold (`0..4`), firing the shockwave ring and updating the chapter progress indicator.
-  - **Collapsible Control Dock & Return-to-Top**: Remains accessible at the bottom center across all scroll depths, plus a clean `"Back to Origin"` button in the final chapter to glide back to `scrollProgress = 0`.
+### Interactive State & Physics Verification
+- **Pure Unit-Tested Functions**: Both `computeScrollChoreography` (for the S-curve twist, pinch glow, and tremor) and `computePortalCutsceneState(progress)` (for the 3-stage warp transition cutscene) will be implemented as pure deterministic functions with unit tests.
+- **Zero-Allocation Render Loop**: All shader uniforms (`uCoreTwist`, `uCorePressure`, `uPortalFlash`) update in-place inside the `requestAnimationFrame` loop for locked 60fps performance during both scrolling and link transitions.

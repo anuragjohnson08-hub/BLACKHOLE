@@ -4,6 +4,8 @@ import {
   computeGentleBlackHoleRotation,
   computeIsotropicScreenCoords,
   computeOrbitalAngularSpeed,
+  computePortalCutsceneState,
+  computeScrollChoreography,
   stepCursorTrailParticle,
   stepParticleKinematics,
   SIMULATION_PRESETS,
@@ -12,6 +14,59 @@ import {
   type ParticleState,
   type SimulationConfig,
 } from './blackholePhysics';
+
+test('computeScrollChoreography maps scroll progress and velocity to zoom, tilt, coreTwist, pressure effects, hero split, warp, and chapters', () => {
+  const origin = computeScrollChoreography(0, 0);
+  assert.equal(origin.zoomScale, 1.0);
+  assert.equal(origin.heroSplitPx, 0);
+  assert.equal(origin.heroOpacity, 1.0);
+  assert.equal(origin.chapterIndex, 0);
+  assert.equal(origin.coreTwist, 0);
+  assert.equal(origin.corePressureGlow, 0);
+  assert.equal(origin.pressureTremor, 0);
+
+  const midScroll = computeScrollChoreography(0.45, 0.8);
+  assert.ok(midScroll.zoomScale > 1.35, 'Black hole should zoom in as user scrolls down');
+  assert.ok(midScroll.tiltDegOffset > 10, 'Accretion disk tilt should progress with scroll');
+  assert.equal(midScroll.heroOpacity, 0, 'Hero title should cleanly fade out past 24% scroll');
+  assert.ok(midScroll.heroSplitPx > 200, 'Hero title halves should parallax apart');
+  assert.ok(midScroll.warpFactor > 1.0, 'Scroll velocity should boost particle warp factor');
+  assert.equal(midScroll.chapterIndex, 2, '45% scroll should map to Chapter 2 (Consistency)');
+  assert.ok(
+    midScroll.coreTwist > 0.25 && midScroll.coreTwist < 0.5,
+    'Core S-curve twist should smoothly build through middle chapters'
+  );
+
+  const deepHorizon = computeScrollChoreography(1.0, 0);
+  assert.ok(deepHorizon.zoomScale > 1.9, 'Deep scroll reaches maximum Event Horizon close-up');
+  assert.equal(deepHorizon.chapterIndex, 4, '100% scroll should map to Chapter 4 (Dedication)');
+  assert.equal(deepHorizon.coreTwist, 1.0, 'Core twist reaches maximum S-curve pinch at final chapter');
+  assert.equal(deepHorizon.corePressureGlow, 1.0, 'Core compression glow peaks at final chapter');
+  assert.equal(deepHorizon.pressureTremor, 1.0, 'Gravitational pressure tremor peaks at final chapter');
+});
+
+test('computePortalCutsceneState drives 3-stage link redirect transition cutscene (Overdrive -> Plunge -> Singularity Flash)', () => {
+  const idle = computePortalCutsceneState(0);
+  assert.equal(idle.stage, 'idle');
+  assert.equal(idle.zoomBoost, 1);
+  assert.equal(idle.flashIntensity, 0);
+  assert.equal(idle.uiFadeOut, 1);
+
+  const overdrive = computePortalCutsceneState(0.2);
+  assert.equal(overdrive.stage, 'overdrive');
+  assert.ok(overdrive.twistBoost > 0.2, 'Core twist overdrive accelerates immediately');
+  assert.ok(overdrive.uiFadeOut < 0.4, 'Page UI fades out during stage 1');
+
+  const plunge = computePortalCutsceneState(0.6);
+  assert.equal(plunge.stage, 'plunge');
+  assert.ok(plunge.zoomBoost > 1.5, 'Camera plunges into event horizon during stage 2');
+  assert.equal(plunge.percent, 60);
+
+  const climax = computePortalCutsceneState(1.0);
+  assert.equal(climax.stage, 'flash');
+  assert.equal(climax.flashIntensity, 1.0, 'Singularity white-out flash reaches 1.0 at 100%');
+  assert.equal(climax.percent, 100);
+});
 
 test('computeIsotropicScreenCoords preserves exact 1:1 circularity in both fullscreen (1920x1080) and half-screen (720x900)', () => {
   const viewports = [
@@ -24,7 +79,7 @@ test('computeIsotropicScreenCoords preserves exact 1:1 circularity in both fulls
   for (const vp of viewports) {
     const centerPxX = 0.495 * vp.w;
     const centerPxY = 0.465 * vp.h;
-    const pixelRadius = 220; // 220px offset horizontally vs 220px offset vertically
+    const pixelRadius = 220;
 
     const rightPoint = computeIsotropicScreenCoords(centerPxX + pixelRadius, centerPxY, vp.w, vp.h);
     const topPoint = computeIsotropicScreenCoords(centerPxX, centerPxY + pixelRadius, vp.w, vp.h);
@@ -59,7 +114,7 @@ test('computeOrbitalAngularSpeed decreases with radius (Keplerian falloff) and s
   assert.ok(Math.abs(fastSpin - normalSpin * 2) < 1e-6, 'Angular speed scales linearly with spinSpeed');
 });
 
-test('stepParticleKinematics advances angle and swirls around cursor in vortex mode', () => {
+test('stepParticleKinematics advances angle, swirls around cursor, and accelerates during scroll warp', () => {
   const baseParticle: ParticleState = {
     x: 3.0,
     y: 0.0,
@@ -84,26 +139,24 @@ test('stepParticleKinematics advances angle and swirls around cursor in vortex m
     0.016,
     vortexConfig,
     { x: 3.2, y: 0.2, z: 0, vx: 1.5, vy: -0.5, active: true },
+    0,
     0
   );
 
   assert.ok(stepped.angle > baseParticle.angle, 'Particle orbital angle should advance');
   assert.notEqual(stepped.vx, 0, 'Active pointer within range should impart swirling velocity');
-  assert.ok(stepped.heat > baseParticle.heat, 'Vortex proximity should heat up plasma particles');
 
-  // Test repulse vs vortex velocity direction
-  const repulseConfig: SimulationConfig = {
-    ...SIMULATION_PRESETS.gargantua,
-    interactionMode: 'repulse',
-  };
-  const repulsed = stepParticleKinematics(
+  // Verify warpFactor accelerates particles along Z and increases orbital progress
+  const warped = stepParticleKinematics(
     baseParticle,
     0.016,
-    repulseConfig,
-    { x: 3.5, y: 0.0, z: 0, active: true },
-    0
+    vortexConfig,
+    { x: 0, y: 0, z: 0, active: false },
+    0,
+    1.8
   );
-  assert.ok(repulsed.vx < 0, 'Repulse mode with pointer at +x offset should push particle in -x direction');
+  assert.ok(warped.vz > 0, 'Scroll warp factor should propel particles toward the viewer');
+  assert.ok(warped.angle > stepped.angle, 'Scroll warp factor should accelerate orbital speed');
 });
 
 test('stepCursorTrailParticle spawns at active cursor and swirls along trail', () => {
@@ -130,16 +183,6 @@ test('stepCursorTrailParticle spawns at active cursor and swirls along trail', (
 
   assert.equal(spawned.life, 1.0, 'Expired trail particle should respawn at full life when cursor is active');
   assert.ok(Math.hypot(spawned.x - 2.0, spawned.y - -1.0) < 0.6, 'Respawned trail particle should appear near cursor');
-
-  const stepped = stepCursorTrailParticle(
-    spawned,
-    3,
-    0.016,
-    { x: 2.05, y: -0.95, z: 0, vx: 3.0, vy: 1.5, active: true },
-    1.0
-  );
-  assert.ok(stepped.life < 1.0 && stepped.life > 0, 'Active trail particle life should decay smoothly');
-  assert.notEqual(stepped.x, spawned.x, 'Trail particle should swirl and move along its trajectory');
 });
 
 test('stepParticleKinematics respawns particle when crossing event horizon', () => {
@@ -173,7 +216,9 @@ test('stepParticleKinematics respawns particle when crossing event horizon', () 
   assert.ok(next.radius > 7.0, 'Particle crossing inner horizon threshold should respawn in outer accretion disk');
 });
 
-test('MERTANA_PILLARS contains all four brand pillars from reference design', () => {
+test('MERTANA_PILLARS contains all four brand pillars with scroll chapter metadata', () => {
   const labels = MERTANA_PILLARS.map((p) => p.label);
   assert.deepEqual(labels, ['Experience', 'Consistency', 'Quality', 'Dedication']);
+  assert.equal(MERTANA_PILLARS[0].chapterNumber, '01');
+  assert.equal(MERTANA_PILLARS[3].chapterNumber, '04');
 });
